@@ -1,0 +1,368 @@
+# -*- coding: utf-8 -*-
+# this file is released under public domain and you can use without limitations
+
+#########################################################################
+## This is a samples controller
+## - index is the default action of any application
+## - user is required for authentication and authorization
+## - download is for downloading files uploaded in the db (does streaming)
+## - call exposes all registered services (none by default)
+#########################################################################
+import StringIO, sys
+from contextlib import contextmanager
+from code import InteractiveConsole
+import random
+import os
+import types
+import new
+import pickle
+import wsgiref.handlers
+import logging
+import traceback
+
+try:
+    from google.appengine.api import users
+    from google.appengine.ext import db as db1,webapp
+    INITAIL_UNPICKABLES = ['from google.appengine.ext import db as db1','from google.appengine.api import users']
+except:
+    from google3.apphosting.api import users
+    from google3.apphosting.ext import db as db1
+    from google3.apphosting.ext import webapp
+    INITAIL_UNPICKABLES = ['from google3.apphosting.ext import db as db1','from google3.apphostin.api import users']
+
+# Types that can't be pickled.
+UNPICKLABLE_TYPES = (
+  types.ModuleType,
+  types.TypeType,
+  types.ClassType,
+  types.FunctionType,
+  )
+
+# Unpicklable statements to seed new sessions with.
+INITIAL_UNPICKLABLES = ['import logging','import os','import sys']
+
+
+def index():
+    """
+    example action using the internationalization operator T and flash
+    rendered by views/default/index.html or views/generic.html
+
+    if you need a simple wiki simple replace the two lines below with:
+    return auth.wiki()
+    """
+    #response.flash = T("Welcome to web2py!")
+    if not session.counter :
+        session.counter=random.randint(1,1000)
+    return dict(message=T('Hello World'))
+    #return "Hello World"
+    #return dict(message='Hello World',message1='Hello World again!!')
+
+class tut_record(db1.Model):
+    uid = db1.IntegerProperty()
+    tid = db1.IntegerProperty()
+    
+
+def user():
+    """
+    exposes:
+    http://..../[app]/default/user/login
+    http://..../[app]/default/user/logout
+    http://..../[app]/default/user/register
+    http://..../[app]/default/user/profile
+    http://..../[app]/default/user/retrieve_password
+    http://..../[app]/default/user/change_password
+    use @auth.requires_login()
+        @auth.requires_membership('group name')
+        @auth.requires_permission('read','table name',record_id)
+    to decorate functions that need access control
+    """
+    files = None
+    progress= 0
+    if auth.is_logged_in():
+        file_form = FORM(INPUT(_name='file_title',_type='text'),INPUT(_name='file_file',_type='file'))
+        if file_form.accepts(request.vars,formname='file_form'):
+            fil = db.files.file.store(file_form.vars.file_file.file, file_form.vars.file_file.filename)
+            id = db.files.insert(file=fil,title=file_form.vars.file_title,uid=auth.user_id)
+        files = db(db.files.uid == auth.user_id).select()
+        
+
+    if auth.is_logged_in():
+        q = db1.Query(tut_record)
+        q.filter("uid =",auth.user_id)
+        result = q.get()
+        if result is None:
+            employee = tut_record(uid=auth.user_id,tid=0)
+            employee.put()
+        else:
+            progress = result.tid
+        
+    return dict(form=auth(),files=files,progress=progress)
+
+
+def download():
+    """
+    allows downloading of uploaded files
+    http://..../[app]/default/download/[filename]
+    """
+    return response.download(request, db)
+
+
+def call():
+    """
+    exposes services. for example:
+    http://..../[app]/default/call/jsonrpc
+    decorate with @services.jsonrpc the functions to expose
+    supports xml, json, xmlrpc, jsonrpc, amfrpc, rss, csv
+    """
+    return service()
+
+
+@auth.requires_signature()
+def data():
+    """
+    http://..../[app]/default/data/tables
+    http://..../[app]/default/data/create/[table]
+    http://..../[app]/default/data/read/[table]/[id]
+    http://..../[app]/default/data/update/[table]/[id]
+    http://..../[app]/default/data/delete/[table]/[id]
+    http://..../[app]/default/data/select/[table]
+    http://..../[app]/default/data/search/[table]
+    but URLs must be signed, i.e. linked with
+      A('table',_href=URL('data/tables',user_signature=True))
+    or with the signed load operator
+      LOAD('default','data.load',args='tables',ajax=True,user_signature=True)
+    """
+    return dict(form=crud())
+
+
+def echo():
+    return request.vars['name']
+
+@contextmanager
+def redirected(out=sys.stdout, err=sys.stderr):
+	    saved = sys.stdout, sys.stderr
+	    sys.stdout, sys.stderr = out, err
+	    try:
+	        yield
+	    finally:
+	        sys.stdout, sys.stderr = saved
+
+		
+def update_tut():
+    
+    if(auth.is_logged_in()):
+        q = db1.Query(tut_record)
+        q.filter("uid =",auth.user_id)
+        result = q.get()
+        if not(result is None):
+            result.tid = int(request.vars['name'])
+            result.put()
+            return 0
+        else:
+            return -1
+    else:
+        return 0
+
+def get_tut():
+    if auth.is_logged_in():
+        q = db1.Query(tut_record)
+        q.filter("uid =",auth.user_id)
+        result = q.get()
+        if result is not None:
+            return result.tid
+        else:
+            return 0
+    else:
+        return 0
+
+class Session(db1.Model):
+  '''
+  A shell session. Stores the session's globals.
+
+  Each session globals is stored in one of two places:
+
+  If the global is picklable, it's stored in the parallel globals and
+  global_names list properties. (They're parallel lists to work around the
+  unfortunate fact that the datastore can't store dictionaries natively.)
+
+  If the global is not picklable (e.g. modules, classes, and functions), or if
+  it was created by the same statement that created an unpicklable global,
+  it's not stored directly. Instead, the statement is stored in the
+  unpicklables list property. On each request, before executing the current
+  statement, the unpicklable statements are evaluated to recreate the
+  unpicklable globals.
+
+  The unpicklable_names property stores all of the names of globals that were
+  added by unpicklable statements. When we pickle and store the globals after
+  executing a statement, we skip the ones in unpicklable_names.
+
+  Using Text instead of string is an optimization. We don't query on any of
+  these properties, so they don't need to be indexed.
+  '''
+  global_names = db1.ListProperty(db1.Text)
+  globals = db1.ListProperty(db1.Blob)
+  unpicklable_names = db1.ListProperty(db1.Text)
+  unpicklables = db1.ListProperty(db1.Text)
+
+  def set_global(self, name, value):
+    '''
+	Adds a global, or updates it if it already exists.
+
+    Also removes the global from the list of unpicklable names.
+
+    Args:
+      name: the name of the global to remove
+      value: any picklable value
+    '''
+    blob = db1.Blob(pickle.dumps(value))
+
+    if name in self.global_names:
+      index = self.global_names.index(name)
+      self.globals[index] = blob
+    else:
+      self.global_names.append(db1.Text(name))
+      self.globals.append(blob)
+
+    self.remove_unpicklable_name(name)
+
+  def remove_global(self, name):
+    '''
+	Removes a global, if it exists.
+
+    Args:
+      name: string, the name of the global to remove
+    '''
+    if name in self.global_names:
+      index = self.global_names.index(name)
+      del self.global_names[index]
+      del self.globals[index]
+
+  def globals_dict(self):
+    '''
+	Returns a dictionary view of the globals.
+    '''
+    return dict((name, pickle.loads(val))
+                for name, val in zip(self.global_names, self.globals))
+
+  def add_unpicklable(self, statement, names):
+    '''
+	Adds a statement and list of names to the unpicklables.
+    Also removes the names from the globals.
+
+    Args:
+      statement: string, the statement that created new unpicklable global(s).
+      names: list of strings; the names of the globals created by the statement.
+    '''
+    self.unpicklables.append(db1.Text(statement))
+
+    for name in names:
+      self.remove_global(name)
+      if name not in self.unpicklable_names:
+        self.unpicklable_names.append(db1.Text(name))
+
+  def remove_unpicklable_name(self, name):
+    '''
+	Removes a name from the list of unpicklable names, if it exists.
+
+    Args:
+      name: string, the name of the unpicklable global to remove
+    '''
+    if name in self.unpicklable_names:
+      self.unpicklable_names.remove(name)
+
+def evaluate():
+	'''
+	Evaluates a python statement in a given session and returns the result.
+	'''
+	statement = request.vars['name']
+	
+	#set default value for testing purpose
+	sessionID=10000;
+	
+	if not statement:
+		return
+
+	# the python compiler doesn't like network line endings
+	statement = statement.replace('\r\n', '\n')
+	#return statement
+
+	# load the session from the datastore corresponding to sessionID
+	try:
+		session = Session.get_or_insert(str(sessionID))
+	except:
+		return "Error"
+	
+	# add a couple newlines at the end of the statement. this makes
+	# single-line expressions such as 'class Foo: pass' evaluate happily.
+	statement += '\n\n'
+	
+	#return statement
+	# log and compile the statement up front
+	try:
+	  logging.info('Compiling and evaluating:\n%s' % statement)
+	  compiled = compile(statement, '<string>', 'single')
+	except:
+	  return traceback.format_exc()
+	# create a dedicated module to be used as this statement's __main__
+	statement_module = new.module('__main__')
+	
+
+	# use this request's __builtin__, since it changes on each request.
+	# this is needed for import statements, among other things.
+	import __builtin__
+	statement_module.__builtins__ = __builtin__
+
+	# swap in our custom module for __main__. then unpickle the session
+	# globals, run the statement, and re-pickle the session globals, all
+	# inside it.
+	old_main = sys.modules.get('__main__')
+	try:
+	  sys.modules['__main__'] = statement_module
+	  statement_module.__name__ = '__main__'
+
+	  # re-evaluate the unpicklables
+	  for code in session.unpicklables:
+		exec code in statement_module.__dict__
+
+	  # re-initialize the globals
+	  for name, val in session.globals_dict().items():
+		try:
+		  statement_module.__dict__[name] = val
+		except:
+		  msg = 'Dropping %s since it could not be unpickled.\n' % name
+		  session.remove_global(name)
+
+	  # run!
+	  out = StringIO.StringIO()
+	  err = StringIO.StringIO()
+	  old_globals = dict(statement_module.__dict__)
+	  try:
+		with redirected(out = out, err = err):
+			exec compiled in statement_module.__dict__
+	  except:
+		return traceback.format_exc()
+		
+	  # extract the new globals that this statement added
+	  new_globals = {}
+	  for name, val in statement_module.__dict__.items():
+		if name not in old_globals or val != old_globals[name]:
+		  new_globals[name] = val
+
+	  if True in [isinstance(val, UNPICKLABLE_TYPES)
+				  for val in new_globals.values()]:
+		# this statement added an unpicklable global. store the statement and
+		# the names of all of the globals it added in the unpicklables.
+		session.add_unpicklable(statement, new_globals.keys())
+		logging.debug('Storing this statement as an unpicklable.')
+
+	  else:
+		# this statement didn't add any unpicklables. pickle and store the
+		# new globals back into the datastore.
+		for name, val in new_globals.items():
+		  if not name.startswith('__'):
+			session.set_global(name, val)
+
+	finally:
+	  sys.modules['__main__'] = old_main
+	session.put()
+	return out.getvalue()

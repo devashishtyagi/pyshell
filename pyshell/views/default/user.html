@@ -1,0 +1,29 @@
+{{left_sidebar_enabled,right_sidebar_enabled=False,('message' in globals())}}
+{{extend 'layout.html'}}
+
+{{=form}}
+
+{{if auth.is_logged_in():}}
+<form action="" enctype="multipart/form-data" method="post">
+        <input name="_formname" type="hidden" value="file_form">
+        <input class="string" name="file_title" type="text" value="">
+        <input class="upload" name="file_file" type="file">
+        <input type="submit" value="Submit">
+</form>
+<p>Progress: {{=progress}}<p>
+
+<ul>
+        {{for fil in files:}}
+        <li>
+            
+            <a href="{{=URL(f='link', args=fil.file)}}">
+                <!--<img src="{{=URL(f='link', args=fil.file)}}"/>-->
+                {{=fil.title}}
+            </a>
+            <a href="{{=URL(f='download', args=fil.file)}}">
+                [Download]
+            </a>
+        </li>
+        {{pass}}
+    {{pass}}        
+</ul>

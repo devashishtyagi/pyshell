@@ -1,0 +1,56 @@
+{{left_sidebar_enabled,right_sidebar_enabled=False,('message' in globals())}}
+{{extend 'layout.html'}}
+   
+
+   <html>
+   <head>
+       <meta charset="utf-8">
+       {{  
+  			response.files.append(URL('static','css/codemirror.css'))
+  		}}
+
+
+{{
+response.include_meta()
+response.include_files()
+}}
+       <script src="{{=URL('static','js/codemirror.js')}}"></script>
+       <script src="{{=URL('static','js/python.js')}}"></script>
+       
+       <style type="text/css">.CodeMirror {border-top: 1px solid black; border-bottom: 1px solid black;}</style>
+
+  </head>
+
+   <body>
+	  
+<div><textarea id="code" name="code">
+>>></textarea></div>
+    <script>
+
+      var editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+        mode: {name: "python",
+               version: 2,
+               singleLineStringErrors: false},
+        lineNumbers: true,
+        indentUnit: 4,
+        tabMode: "shift",
+        matchBrackets: true
+      });
+
+    </script>
+     <script>
+     
+		window.onload = function()
+                {
+			CodeMirror.Init_HTML();	     
+                };
+                      </script>
+   <!-- /container -->
+        <div class="guide">
+                  
+                  <p>
+                    Tutorial!!
+                  </p>
+       </div>
+   </body>
+</html>
